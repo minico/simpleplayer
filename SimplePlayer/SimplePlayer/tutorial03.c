@@ -20,10 +20,12 @@
 // tutorial03 myvideofile.mpg
 //
 // to play the stream on your screen.
-
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libswscale/swscale.h>
+#include <windows.h>
+#include "libavutil/samplefmt.h"
+#include "libavcodec/avcodec.h"
+#include "libavformat/avformat.h"
+#include "libswscale/swscale.h"
+#include "libswresample/swresample.h"
 
 #include <SDL.h>
 #include <SDL_thread.h>
@@ -43,6 +45,9 @@
 
 #define SDL_AUDIO_BUFFER_SIZE 1024
 #define MAX_AUDIO_FRAME_SIZE 192000
+
+struct SwrContext *au_convert_ctx;
+int out_buffer_size = 0;
 
 typedef struct PacketQueue {
 	AVPacketList *first_pkt, *last_pkt;
@@ -153,15 +158,19 @@ int audio_decode_frame_03(AVCodecContext *aCodecCtx, uint8_t *audio_buf, int buf
 					frame.nb_samples,
 					aCodecCtx->sample_fmt,
 					1);
+
+				// 最新版的ffmpeg解码aac之后的PCM格式为AV_SAMPLE_FMT_FLTP，
+				// 而SDL希望render的PCM格式为AV_SAMPLE_FMT_S16，所以解码后需要做转换；
+				swr_convert(au_convert_ctx, &audio_buf, MAX_AUDIO_FRAME_SIZE, (const uint8_t **)frame.data, frame.nb_samples);
+
 				assert(data_size <= buf_size);
-				memcpy(audio_buf, frame.data[0], data_size);
 			}
 			if (data_size <= 0) {
 				/* No data yet, get more frames */
 				continue;
 			}
 			/* We have data, return it and come back for more later */
-			return data_size;
+			return out_buffer_size;
 		}
 		if (pkt.data)
 			av_free_packet(&pkt);
@@ -191,12 +200,7 @@ void audio_callback_03(void *userdata, Uint8 *stream, int len) {
 		if (audio_buf_index >= audio_buf_size) {
 			/* We have already sent all our data; get more */
 			audio_size = audio_decode_frame_03(aCodecCtx, audio_buf, sizeof(audio_buf));
-			if (audio_size < 0) {
-				/* If error, output silence */
-				audio_buf_size = 1024; // arbitrary?
-				memset(audio_buf, 0, audio_buf_size);
-			}
-			else {
+			if (audio_size > 0) {
 				audio_buf_size = audio_size;
 			}
 			audio_buf_index = 0;
@@ -285,7 +289,7 @@ int ch03_play_audio(const char *pFilePath) {
 
 	// Set audio settings from codec info
 	wanted_spec.freq = aCodecCtx->sample_rate;
-	wanted_spec.format = AUDIO_S16SYS;
+	wanted_spec.format = AUDIO_S16SYS; //SDL希望得到的PCM格式；
 	wanted_spec.channels = aCodecCtx->channels;
 	wanted_spec.silence = 0;
 	wanted_spec.samples = SDL_AUDIO_BUFFER_SIZE;
@@ -298,6 +302,27 @@ int ch03_play_audio(const char *pFilePath) {
 	}
 
 	avcodec_open2(aCodecCtx, aCodec, NULL);
+
+	//Out Audio Param
+	uint64_t out_channel_layout = AV_CH_LAYOUT_STEREO;
+	//nb_samples: AAC-1024 MP3-1152
+	int out_nb_samples = aCodecCtx->frame_size;
+	int out_sample_fmt = AV_SAMPLE_FMT_S16;
+	int out_sample_rate = 44100;
+	int out_channels = av_get_channel_layout_nb_channels(out_channel_layout);
+	//Out Buffer Size
+	out_buffer_size = av_samples_get_buffer_size(NULL, out_channels, out_nb_samples, out_sample_fmt, 1);
+
+
+	//FIX:Some Codec's Context Information is missing
+	int in_channel_layout = av_get_default_channel_layout(aCodecCtx->channels);
+	//Swr， 初始化scale，最新版的ffmpeg解码aac之后的PCM格式为AV_SAMPLE_FMT_FLTP，
+	// 而SDL希望render的PCM格式为AV_SAMPLE_FMT_S16，所以解码后需要做转换；
+	au_convert_ctx = swr_alloc();
+	au_convert_ctx = swr_alloc_set_opts(au_convert_ctx, out_channel_layout, out_sample_fmt, out_sample_rate,
+		in_channel_layout, aCodecCtx->sample_fmt, aCodecCtx->sample_rate, 0, NULL);
+	swr_init(au_convert_ctx);
+
 
 	// audio_st = pFormatCtx->streams[index]
 	packet_queue_init_03(&audioq);
@@ -361,61 +386,66 @@ int ch03_play_audio(const char *pFilePath) {
 	// Read frames and save first five frames to disk
 	i = 0;
 	while (av_read_frame(pFormatCtx, &packet) >= 0) {
-		// Is this a packet from the video stream?
-		if (packet.stream_index == videoStream) {
-			// Decode video frame
-			avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished, &packet);
+			// Is this a packet from the video stream?
+			if (packet.stream_index == videoStream) {
+				// Decode video frame
+				avcodec_decode_video2(pCodecCtx, pFrame, &frameFinished, &packet);
 
-			// Did we get a video frame?
-			if (frameFinished) {
-				SDL_LockYUVOverlay(bmp);
+				// Did we get a video frame?
+				if (frameFinished) {
+					SDL_LockYUVOverlay(bmp);
 
-				AVPicture pict;
-				pict.data[0] = bmp->pixels[0];
-				pict.data[1] = bmp->pixels[2];
-				pict.data[2] = bmp->pixels[1];
+					AVPicture pict;
+					pict.data[0] = bmp->pixels[0];
+					pict.data[1] = bmp->pixels[2];
+					pict.data[2] = bmp->pixels[1];
 
-				pict.linesize[0] = bmp->pitches[0];
-				pict.linesize[1] = bmp->pitches[2];
-				pict.linesize[2] = bmp->pitches[1];
+					pict.linesize[0] = bmp->pitches[0];
+					pict.linesize[1] = bmp->pitches[2];
+					pict.linesize[2] = bmp->pitches[1];
 
-				// Convert the image into YUV format that SDL uses	
-				sws_scale(sws_ctx, (uint8_t const * const *)pFrame->data,
-					pFrame->linesize, 0, pCodecCtx->height,
-					pict.data, pict.linesize);
+					// Convert the image into YUV format that SDL uses	
+					sws_scale(sws_ctx, (uint8_t const * const *)pFrame->data,
+						pFrame->linesize, 0, pCodecCtx->height,
+						pict.data, pict.linesize);
 
-				SDL_UnlockYUVOverlay(bmp);
+					SDL_UnlockYUVOverlay(bmp);
 
-				rect.x = 0;
-				rect.y = 0;
-				rect.w = pCodecCtx->width;
-				rect.h = pCodecCtx->height;
-				SDL_DisplayYUVOverlay(bmp, &rect);
+					rect.x = 0;
+					rect.y = 0;
+					rect.w = pCodecCtx->width;
+					rect.h = pCodecCtx->height;
+					SDL_DisplayYUVOverlay(bmp, &rect);
+					av_free_packet(&packet);
+				}
+			}
+			else if (packet.stream_index == audioStream) {
+				packet_queue_put_03(&audioq, &packet);
+			}
+			else {
 				av_free_packet(&packet);
 			}
-		}
-		else if (packet.stream_index == audioStream) {
-			packet_queue_put_03(&audioq, &packet);
-		}
-		else {
-			av_free_packet(&packet);
-		}
-		// Free the packet that was allocated by av_read_frame
-		SDL_PollEvent(&event);
-		switch (event.type) {
-		case SDL_QUIT:
-			quit = 1;
-			SDL_Quit();
-			exit(0);
-			break;
-		default:
-			break;
-		}
 
+			// Free the packet that was allocated by av_read_frame
+			SDL_PollEvent(&event);
+			switch (event.type) {
+			case SDL_QUIT:
+				quit = 1;
+				SDL_Quit();
+				exit(0);
+				break;
+			default:
+				break;
+			}
 	}
+
+	//因为没有做AV同步，所以视频很快就播完了，需要在这里等待一段时间让音频播完；
+	Sleep(30*1000);
 
 	// Free the YUV frame
 	av_frame_free(&pFrame);
+
+	swr_free(&au_convert_ctx);
 
 	// Close the codecs
 	avcodec_close(pCodecCtxOrig);
