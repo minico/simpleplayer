@@ -10,6 +10,13 @@ extern "C"
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 }
+ 
+extern "C"
+{
+	extern int ch01_dump_video(const char* pFilePath);
+	extern int ch02_play_video(const char* pFilePath);
+	extern int ch03_play_audio(const char* pFilePath);
+}
 
 #include <SDL.h>
 #include <SDL_thread.h>

@@ -44,6 +44,27 @@
     <ClCompile Include="stdafx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="tutorial01.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tutorial02.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tutorial03.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tutorial04.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tutorial05.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tutorial06.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tutorial07.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="SimplePlayer.rc">
