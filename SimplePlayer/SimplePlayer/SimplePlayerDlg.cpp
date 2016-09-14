@@ -157,7 +157,10 @@ void CSimplePlayerDlg::OnBnClickedButtonPlay()
 {
 	//ch01_dump_video(R"(d:\testfile.mp4)");
 	//ch02_play_video(R"(d:\testfile.mp4)");
-	ch03_play_audio(R"(d:\testfile.mp4)");
+	//ch03_play_audio(R"(d:\testfile.mp4)");
+	//ch04_play_video_and_audio(R"(d:\testfile.mp4)");
+	ch04_play_video_and_audio(R"(rtmp://live.hkstv.hk.lxdns.com/live/hks)");
+
 }
 
 // compatibility with newer API

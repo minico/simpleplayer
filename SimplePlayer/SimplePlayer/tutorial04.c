@@ -23,6 +23,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
 
 #include <SDL.h>
 #include <SDL_thread.h>
@@ -51,6 +52,10 @@
 #define FF_QUIT_EVENT (SDL_USEREVENT + 1)
 
 #define VIDEO_PICTURE_QUEUE_SIZE 1
+
+
+struct SwrContext *au_convert_ctx;
+int out_buffer_size = 0;
 
 typedef struct PacketQueue {
   AVPacketList *first_pkt, *last_pkt;
@@ -193,8 +198,10 @@ int audio_decode_frame_04(VideoState *is, uint8_t *audio_buf, int buf_size) {
 					       is->audio_frame.nb_samples,
 					       is->audio_ctx->sample_fmt,
 					       1);
+
+	swr_convert(au_convert_ctx, &audio_buf, MAX_AUDIO_FRAME_SIZE, (const uint8_t **)is->audio_frame.data, is->audio_frame.nb_samples);
+
 	assert(data_size <= buf_size);
-	memcpy(audio_buf, is->audio_frame.data[0], data_size);
       }
       is->audio_pkt_data += len1;
       is->audio_pkt_size -= len1;
@@ -203,7 +210,7 @@ int audio_decode_frame_04(VideoState *is, uint8_t *audio_buf, int buf_size) {
 	continue;
       }
       /* We have data, return it and come back for more later */
-      return data_size;
+      return out_buffer_size;
     }
     if(pkt->data)
       av_free_packet(pkt);
@@ -212,7 +219,7 @@ int audio_decode_frame_04(VideoState *is, uint8_t *audio_buf, int buf_size) {
       return -1;
     }
     /* next packet */
-    if(packet_queue_get(&is->audioq, pkt, 1) < 0) {
+    if(packet_queue_get_04(&is->audioq, pkt, 1) < 0) {
       return -1;
     }
     is->audio_pkt_data = pkt->data;
@@ -228,7 +235,7 @@ void audio_callback_04(void *userdata, Uint8 *stream, int len) {
   while(len > 0) {
     if(is->audio_buf_index >= is->audio_buf_size) {
       /* We have already sent all our data; get more */
-      audio_size = audio_decode_frame(is, is->audio_buf, sizeof(is->audio_buf));
+      audio_size = audio_decode_frame_04(is, is->audio_buf, sizeof(is->audio_buf));
       if(audio_size < 0) {
 	/* If error, output silence */
 	is->audio_buf_size = 1024;
@@ -308,7 +315,7 @@ void video_refresh_timer_04(void *userdata) {
   
   if(is->video_st) {
     if(is->pictq_size == 0) {
-      schedule_refresh(is, 1);
+      schedule_refresh_04(is, 1);
     } else {
       vp = &is->pictq[is->pictq_rindex];
       /* Now, normally here goes a ton of code
@@ -318,10 +325,10 @@ void video_refresh_timer_04(void *userdata) {
 	 the timing - but I don't suggest that ;)
 	 We'll learn how to do it for real later.
       */
-      schedule_refresh(is, 40);
+      schedule_refresh_04(is, 40);
       
       /* show the picture! */
-      video_display(is);
+      video_display_04(is);
       
       /* update queue for next picture! */
       if(++is->pictq_rindex == VIDEO_PICTURE_QUEUE_SIZE) {
@@ -333,7 +340,7 @@ void video_refresh_timer_04(void *userdata) {
       SDL_UnlockMutex(is->pictq_mutex);
     }
   } else {
-    schedule_refresh(is, 100);
+    schedule_refresh_04(is, 100);
   }
 }
       
@@ -388,7 +395,7 @@ int queue_picture_04(VideoState *is, AVFrame *pFrame) {
     SDL_Event event;
 
     vp->allocated = 0;
-    alloc_picture(is);
+    alloc_picture_04(is);
     if(is->quit) {
       return -1;
     }
@@ -437,7 +444,7 @@ int video_thread_04(void *arg) {
   pFrame = av_frame_alloc();
 
   for(;;) {
-    if(packet_queue_get(&is->videoq, packet, 1) < 0) {
+    if(packet_queue_get_04(&is->videoq, packet, 1) < 0) {
       // means we quit getting packets
       break;
     }
@@ -445,7 +452,7 @@ int video_thread_04(void *arg) {
     avcodec_decode_video2(is->video_ctx, pFrame, &frameFinished, packet);
     // Did we get a video frame?
     if(frameFinished) {
-      if(queue_picture(is, pFrame) < 0) {
+      if(queue_picture_04(is, pFrame) < 0) {
 	break;
       }      
     }
@@ -501,20 +508,43 @@ int stream_component_open_04(VideoState *is, int stream_index) {
 
   switch(codecCtx->codec_type) {
   case AVMEDIA_TYPE_AUDIO:
-    is->audioStream = stream_index;
-    is->audio_st = pFormatCtx->streams[stream_index];
-    is->audio_ctx = codecCtx;
-    is->audio_buf_size = 0;
-    is->audio_buf_index = 0;
-    memset(&is->audio_pkt, 0, sizeof(is->audio_pkt));
-    packet_queue_init(&is->audioq);
-    SDL_PauseAudio(0);
+  {
+	  is->audioStream = stream_index;
+	  is->audio_st = pFormatCtx->streams[stream_index];
+	  is->audio_ctx = codecCtx;
+	  is->audio_buf_size = 0;
+	  is->audio_buf_index = 0;
+	  memset(&is->audio_pkt, 0, sizeof(is->audio_pkt));
+	  packet_queue_init_04(&is->audioq);
+	  SDL_PauseAudio(0);
+
+	  //Out Audio Param
+	  uint64_t out_channel_layout = AV_CH_LAYOUT_STEREO;
+	  //nb_samples: AAC-1024 MP3-1152
+	  int out_nb_samples = codecCtx->frame_size;
+	  int out_sample_fmt = AV_SAMPLE_FMT_S16;
+	  int out_sample_rate = 44100;
+	  int out_channels = av_get_channel_layout_nb_channels(out_channel_layout);
+	  //Out Buffer Size
+	  out_buffer_size = av_samples_get_buffer_size(NULL, out_channels, out_nb_samples, out_sample_fmt, 1);
+
+
+	  //FIX:Some Codec's Context Information is missing
+	  int in_channel_layout = av_get_default_channel_layout(codecCtx->channels);
+	  //Swr， 初始化scale，最新版的ffmpeg解码aac之后的PCM格式为AV_SAMPLE_FMT_FLTP，
+	  // 而SDL希望render的PCM格式为AV_SAMPLE_FMT_S16，所以解码后需要做转换；
+	  au_convert_ctx = swr_alloc();
+	  au_convert_ctx = swr_alloc_set_opts(au_convert_ctx, out_channel_layout, out_sample_fmt, out_sample_rate,
+		  in_channel_layout, codecCtx->sample_fmt, codecCtx->sample_rate, 0, NULL);
+	  swr_init(au_convert_ctx);
+  }
+
     break;
   case AVMEDIA_TYPE_VIDEO:
     is->videoStream = stream_index;
     is->video_st = pFormatCtx->streams[stream_index];
     is->video_ctx = codecCtx;
-    packet_queue_init(&is->videoq);
+    packet_queue_init_04(&is->videoq);
     is->video_tid = SDL_CreateThread(video_thread_04, is);
     is->sws_ctx = sws_getContext(is->video_ctx->width, is->video_ctx->height,
 				 is->video_ctx->pix_fmt, is->video_ctx->width,
@@ -530,7 +560,7 @@ int stream_component_open_04(VideoState *is, int stream_index) {
 int decode_thread_04(void *arg) {
 
   VideoState *is = (VideoState *)arg;
-  AVFormatContext *pFormatCtx;
+  AVFormatContext *pFormatCtx = NULL;
   AVPacket pkt1, *packet = &pkt1;
 
   int video_index = -1;
@@ -568,10 +598,10 @@ int decode_thread_04(void *arg) {
     }
   }
   if(audio_index >= 0) {
-    stream_component_open(is, audio_index);
+    stream_component_open_04(is, audio_index);
   }
   if(video_index >= 0) {
-    stream_component_open(is, video_index);
+    stream_component_open_04(is, video_index);
   }   
 
   if(is->videoStream < 0 || is->audioStream < 0) {
@@ -601,9 +631,9 @@ int decode_thread_04(void *arg) {
     }
     // Is this a packet from the video stream?
     if(packet->stream_index == is->videoStream) {
-      packet_queue_put(&is->videoq, packet);
+      packet_queue_put_04(&is->videoq, packet);
     } else if(packet->stream_index == is->audioStream) {
-      packet_queue_put(&is->audioq, packet);
+      packet_queue_put_04(&is->audioq, packet);
     } else {
       av_free_packet(packet);
     }
@@ -657,7 +687,7 @@ int ch04_play_video_and_audio(const char *pFilePath) {
   is->pictq_mutex = SDL_CreateMutex();
   is->pictq_cond = SDL_CreateCond();
 
-  schedule_refresh(is, 40);
+  schedule_refresh_04(is, 40);
 
   is->parse_tid = SDL_CreateThread(decode_thread_04, is);
   if(!is->parse_tid) {
@@ -675,7 +705,7 @@ int ch04_play_video_and_audio(const char *pFilePath) {
       return 0;
       break;
     case FF_REFRESH_EVENT:
-      video_refresh_timer(event.user.data1);
+      video_refresh_timer_04(event.user.data1);
       break;
     default:
       break;
