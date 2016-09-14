@@ -54,7 +54,7 @@
 #define VIDEO_PICTURE_QUEUE_SIZE 1
 
 
-struct SwrContext *au_convert_ctx;
+struct SwrContext *au_convert_ctx = NULL;
 int out_buffer_size = 0;
 
 typedef struct PacketQueue {

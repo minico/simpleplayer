@@ -17,6 +17,8 @@ extern "C"
 	extern int ch02_play_video(const char* pFilePath);
 	extern int ch03_play_audio(const char* pFilePath);
 	extern int ch04_play_video_and_audio(const char* pFilePath);
+	extern int ch05_sync_video(const char* pFilePath);
+	
 }
 
 #include <SDL.h>

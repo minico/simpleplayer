@@ -159,8 +159,10 @@ void CSimplePlayerDlg::OnBnClickedButtonPlay()
 	//ch02_play_video(R"(d:\testfile.mp4)");
 	//ch03_play_audio(R"(d:\testfile.mp4)");
 	//ch04_play_video_and_audio(R"(d:\testfile.mp4)");
-	ch04_play_video_and_audio(R"(rtmp://live.hkstv.hk.lxdns.com/live/hks)");
 
+	//ch04_play_video_and_audio(R"(rtmp://live.hkstv.hk.lxdns.com/live/hks)");
+	//ch04_play_video_and_audio(R"(rtmp://210.14.132.234/live_zby/_5_1_3)");
+	ch05_sync_video(R"(rtmp://live.hkstv.hk.lxdns.com/live/hks)");
 }
 
 // compatibility with newer API
