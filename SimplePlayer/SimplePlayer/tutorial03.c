@@ -308,7 +308,7 @@ int ch03_play_audio(const char *pFilePath) {
 	//nb_samples: AAC-1024 MP3-1152
 	int out_nb_samples = aCodecCtx->frame_size;
 	int out_sample_fmt = AV_SAMPLE_FMT_S16;
-	int out_sample_rate = 44100;
+	int out_sample_rate = aCodecCtx->sample_rate;
 	int out_channels = av_get_channel_layout_nb_channels(out_channel_layout);
 	//Out Buffer Size
 	out_buffer_size = av_samples_get_buffer_size(NULL, out_channels, out_nb_samples, out_sample_fmt, 1);
